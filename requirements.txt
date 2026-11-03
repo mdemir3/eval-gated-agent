@@ -1,0 +1,23 @@
+# Direct dependencies, pinned to the versions this repo was built and evaluated with.
+# In CI, CPU-only torch is installed first (see .github/workflows/evals.yml) so
+# sentence-transformers doesn't pull the multi-GB CUDA build.
+
+# Agent graph and LLM access
+langgraph==1.2.19
+langchain-core==1.7.4
+langchain-openai==1.7.3
+langchain-anthropic==1.7.9
+langchain-ollama==1.1.0
+
+# Tools over MCP + retrieval
+mcp==2.3.0
+chromadb==1.5.9
+sentence-transformers==6.2.0
+
+# Evals and tests
+deepeval==4.3.2
+pytest==9.2.0
+
+# Config / typing
+pydantic==2.14.2
+python-dotenv==1.2.4

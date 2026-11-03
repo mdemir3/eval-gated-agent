@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Generated artifacts
+.chroma/
+eval-report.md
+eval-results.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
