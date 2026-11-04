@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 # --- Planner -------------------------------------------------------------------
 
-PLANNER_SYSTEM = """You are the planner for a question-answering agent that may only answer from tool results.
+PLANNER_SYSTEM = """You are the planner for an agent that may only answer from tool results.
 Decide which tools to call, in order, to collect the evidence needed. Do not answer the question yourself.
 
 Available tools (discovered from the MCP server):
