@@ -7,7 +7,8 @@
               answer from the evidence only, one part at a time for compound
               questions. Nothing in here raises.
 * Verifier    groundedness guard (no invented names/numbers), completeness guard
-              (every part of a compound question answered), then an LLM fact-check.
+              (every part of a compound question answered), then an LLM fact-check
+              (a PASS that still names missing information counts as FAIL).
               FAIL with retries left loops back to the Researcher with feedback.
 * Fallback    a fixed refusal plus the sources consulted. Never a guess.
 """
@@ -471,6 +472,12 @@ class AgentNodes:
             try:
                 out = await self.llm.generate(VerifierOutput, VERIFIER_SYSTEM, user)
                 verdict, feedback, missing = out.verdict, out.reason, out.missing.strip()
+                if verdict == "PASS" and missing:
+                    # A PASS that still names missing information contradicts itself (the prompt
+                    # requires missing="" on PASS). Small models mix up the fields; don't guess.
+                    check = "verifier_consistency"
+                    verdict = "FAIL"
+                    feedback = f"The verifier passed the answer but said information is missing: {missing}."
             except Exception as exc:
                 verdict, feedback = "FAIL", f"Verifier error ({type(exc).__name__}); treating as unverified."
 

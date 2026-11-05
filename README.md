@@ -187,6 +187,8 @@ These came out of measuring the agent rather than guessing:
   fewer than N specific facts. I tried a "checklist" LLM verifier instead; it scored
   7/10 against the plain verifier's 8/10 on a labelled probe set, and both of the
   plain verifier's misses were half-answers that the completeness guard catches.
+  After the LLM verifier, a consistency check treats a PASS that still names
+  missing information as a FAIL: the 3B model sometimes mixes up its output fields.
 - **Sources are chosen lexically, not taken from the model's citations.** The model
   cited things like `/api/v1/evidence?ids=[capital-canada]`, or documents it hadn't
   used. Sources are the evidence items that contain the answer's specific terms.

@@ -25,7 +25,7 @@ Available tools (discovered from the MCP server):
 
 Rules:
 1. Use rag_search for general knowledge: capitals, countries, cities, planets, inventions, geography.
-2. Use mock_api_get only for demo API records: users, orders, order tracking, weather, inventory. Never use it for facts about places, rivers, history or science; those come from rag_search.
+2. Use mock_api_get only for demo API records: users, orders, order tracking, weather, inventory. Never use it for facts about places, rivers, history or science; those come from rag_search. Current weather is an API record, not a fact about a place: for the weather in any city, use mock_api_get with /weather/<city>.
 3. Plan only the steps the question needs (1 to 4). If the question has two parts, plan a step for each part.
 4. If a step needs a value that an earlier mock_api_get step returns, write {{N.field}}, where N is the number of that earlier step and field is the record field. Example: {{1.city}}.
 5. rag_search needs a short search phrase in "query". mock_api_get needs a concrete path in "endpoint", such as /users/7.

@@ -195,6 +195,19 @@ def test_groundedness_guard_rejects_invented_name_without_llm_call(tool_specs):
     assert llm.prompts["VerifierOutput"] == []  # the LLM verifier was never asked
 
 
+def test_self_contradicting_verifier_pass_is_treated_as_fail(tool_specs):
+    question = "What is the email address of user 2?"
+    record = {"id": 2, "name": "Sam Demo", "city": "Tokyo", "member_since": 2021}
+    contradictory = VerifierOutput(reason="FAIL", missing="user 2's email address", verdict="PASS")
+    llm = ScriptedLLM([api_step("/users/2")], [draft("Sam Demo.", "api:/users/2")], verdicts=[contradictory])
+    tools = FakeTools(tool_specs, lambda name, *_: api_result("/users/2", record) if name == "mock_api_get" else rag_result("capital-japan"))
+    state = run(question, llm, tools)
+
+    assert state["final"]["status"] == "fallback"
+    assert verdict_checks(state) == ["verifier_consistency"] * (1 + MAX_RETRIES)
+    assert state["missing_info"] == "user 2's email address"
+
+
 def test_completeness_guard_rejects_half_answer(tool_specs):
     question = "Which city does user 3 live in, and which river is that city on?"
     record = {"id": 3, "name": "Riley Demo", "city": "Ottawa", "member_since": 2020}
