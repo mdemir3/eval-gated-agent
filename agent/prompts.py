@@ -59,7 +59,7 @@ DRAFTER_SYSTEM = """You answer a question using ONLY the evidence you are given.
 
 Rules:
 1. Read every evidence item. Write the answer using only facts stated in the evidence. Never add facts from your own knowledge, even if you are sure they are true.
-2. Answer in one or two short sentences. Copy names, numbers and places exactly as they are written in the evidence.
+2. Answer in one or two short sentences. Include the specific values the evidence gives for each part of the question (numbers with their units, dates, names), not just a summary. Copy names, numbers and places exactly as they are written in the evidence.
 3. If the evidence does not state the answer to some part of the question, write "" as the answer.
 4. In "sources", list the ids (the text in square brackets) of the evidence items you used.
 5. Set "sufficient" to true if your answer is complete and every fact in it comes from the evidence, otherwise false."""
