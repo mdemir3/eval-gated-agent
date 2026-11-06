@@ -1,5 +1,7 @@
 # Eval-Gated Agent
 
+[![evals](https://github.com/mdemir3/eval-gated-agent/actions/workflows/evals.yml/badge.svg?branch=main)](https://github.com/mdemir3/eval-gated-agent/actions/workflows/evals.yml)
+
 A small agent that only answers from its tools, plus the eval
 harness that gates every change to it in CI.
 
