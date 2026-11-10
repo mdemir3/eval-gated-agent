@@ -2,8 +2,10 @@
 
 Groundedness guard: a draft fails if it contains a *salient term* - a number or
 a capitalised word that isn't a common English word - that appears in neither
-the evidence nor the question. This is a cheap, model-independent check for
-the most damaging hallucinations (made-up names, dates, quantities).
+the evidence nor the question. Emails and URLs are checked as whole strings:
+"riley.demo@example.com" is invented even when "riley" and "demo" are both in
+the record. This is a cheap, model-independent check for the most damaging
+hallucinations (made-up names, dates, quantities, contact details).
 
 Completeness guard: a question with N fact-seeking parts ("Which city ..., and
 which river ...?") needs at least N distinct *fact terms* in the answer -
@@ -44,6 +46,7 @@ _PART_SPLIT = re.compile(
 _THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}\b)")
 _ORDINAL = re.compile(r"\b(\d+)(?:st|nd|rd|th)\b", re.IGNORECASE)
 _EXPLANATION_PART = re.compile(r"(?:why|how)\b(?!\s+(?:many|much|far|long|tall|old|big|deep|high)\b)", re.IGNORECASE)
+_IDENTIFIER = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+|https?://[^\s,;)\]]+", re.IGNORECASE)
 _TOKEN = re.compile(r"[A-Za-z0-9]+")
 _WORD_AND_SEP = re.compile(r"([A-Za-z0-9]+)([^A-Za-z0-9]*)")
 
@@ -85,10 +88,17 @@ def salient_phrases(text: str) -> list[str]:
     return list(dict.fromkeys(phrases))
 
 
+def identifiers(text: str) -> list[str]:
+    """Email addresses and URLs in `text`, lowercased, without trailing punctuation."""
+    return list(dict.fromkeys(m.rstrip(".").lower() for m in _IDENTIFIER.findall(text)))
+
+
 def unsupported_terms(answer: str, evidence: str, question: str = "") -> list[str]:
-    """Salient terms of `answer` found in neither `evidence` nor `question`."""
+    """Salient terms and identifiers of `answer` found in neither `evidence` nor `question`."""
     allowed = tokens(evidence) | tokens(question)
-    return [t for t in salient_terms(answer) if t.lower() not in allowed]
+    source_text = f"{evidence} {question}".lower()
+    words = [t for t in salient_terms(_IDENTIFIER.sub(" ", answer)) if t.lower() not in allowed]
+    return words + [i for i in identifiers(answer) if i not in source_text]
 
 
 def question_parts(question: str) -> list[str]:

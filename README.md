@@ -8,7 +8,7 @@ harness that gates every change to it in CI.
 The agent is a LangGraph state machine: **Planner → Researcher → Verifier**, with a
 bounded retry loop and a **Fallback** that refuses rather than guesses. Its tools
 (`rag_search` over a local ChromaDB corpus and `mock_api_get` over a deterministic
-fake REST API) are served over **MCP** from a separate process. A 20-case golden
+fake REST API) are served over **MCP** from a separate process. A 21-case golden
 dataset is scored by a **deterministic suite** (no LLM, no key) that blocks merges,
 and an optional **LLM-judge suite** (DeepEval) that runs only when a hosted judge
 key is configured.
@@ -40,7 +40,7 @@ ollama pull llama3.2:3b                 # if LLM_PROVIDER=ollama
 
 python -m evals.build_index --check     # embed corpus/ into .chroma (downloads the 90 MB embedding model once)
 python -m agent.main "Which city does user 3 live in, and which river is that city on?"
-pytest                                  # 119 unit tests, no LLM needed
+pytest                                  # 125 unit tests, no LLM needed
 python -m evals.run                     # deterministic eval suite; exits 1 on any failure
 python -m evals.run --suite all         # + LLM judge, if a hosted judge key is set
 ```
@@ -108,7 +108,7 @@ Verification: FAIL (retries: 2)
 | `rag` | 7 | corpus questions, including two-part ones ("who, and in what year?") |
 | `api` | 2 | demo-API lookups |
 | `multi_tool` | 6 | an API record feeds a corpus search (user → city → river); one hits the flaky endpoint |
-| `unanswerable` | 5 | not in the corpus, a 404, an always-500 endpoint, a field the record lacks. The only correct output is the Fallback |
+| `unanswerable` | 6 | not in the corpus, a 404, an always-500 endpoint, a field the record lacks, and a compound question whose first half the record answers but whose second half (an email) it can't. The only correct output is the Fallback |
 
 Each case lists its expected key facts, relevant doc ids and expected tools. A unit
 test checks that every expected key fact actually appears in the corpus or the API
@@ -145,16 +145,16 @@ Python 3.11 on macOS arm64.
 
 | Check | Result |
 |---|---|
-| Output format | 20/20 |
-| Tool-call correctness | 20/20 |
+| Output format | 21/21 |
+| Tool-call correctness | 21/21 |
 | Key facts | 15/15 |
 | Lexical groundedness | 15/15 |
 | Retrieval | 13/13 |
-| Refusal | 20/20 |
-| **Cases passing every check** | **20/20** |
+| Refusal | 21/21 |
+| **Cases passing every check** | **21/21** |
 | LLM-judge | not run (no key) |
 
-About 3 minutes and ~73 LLM calls for the 20 cases. Two consecutive runs produced
+About 4 minutes and 82 LLM calls for the 21 cases. Two consecutive runs produced
 identical answers, sources and retry counts. Ollama output can differ across
 hardware (Metal locally vs CPU in CI), so the CI run is the result of record. See
 [Limitations](#limitations) before reading much into the 100%.
@@ -185,7 +185,10 @@ These came out of measuring the agent rather than guessing:
   and joining the answers fixed all six multi-part cases.
 - **Deterministic guards run before the LLM verifier.** A groundedness guard rejects
   answers containing names or numbers found in neither the evidence nor the
-  question. A completeness guard rejects answers to an N-part question that state
+  question. Emails and URLs are checked as whole strings: an invented
+  `riley.demo@example.com` is lowercase, and both "riley" and "demo" appear in user
+  3's record, so a word-level check alone would let it through. A completeness
+  guard rejects answers to an N-part question that state
   fewer than N specific facts. I tried a "checklist" LLM verifier instead; it scored
   7/10 against the plain verifier's 8/10 on a labelled probe set, and both of the
   plain verifier's misses were half-answers that the completeness guard catches.
@@ -204,15 +207,16 @@ These came out of measuring the agent rather than guessing:
 ## Limitations
 
 - **The golden set was also the development set.** I tuned the prompts and guards
-  while watching these 20 cases. The few-shot examples use no golden data, but 20/20
+  while watching these cases. The few-shot examples use no golden data, but 21/21
   is a regression baseline, not a measure of how the agent generalises.
 - **The guards are lexical heuristics.** The groundedness guard can't catch a wrong
   pairing of words that both appear in the evidence. The completeness guard detects
   parts with a regex on ", and which/what/who/in what …".
-- **In the reported run, every refusal came from the drafter declaring the evidence
-  insufficient.** The guards and the LLM verifier are covered by unit tests
-  (including mutation checks), but none of them was the deciding check for an
-  unanswerable case in this run.
+- **Most refusals rest on the drafter.** In the reported run, the 6 unanswerable
+  cases went through 18 verifier passes. 14 were rejected because the drafter
+  declared the evidence insufficient, 2 by the groundedness guard, 1 by the LLM
+  verifier and 1 by the consistency check. The whole-string email check did not fire;
+  it is covered by unit tests, including the none-06 scenario.
 - `API_HINT_WORDS` (which words justify an API call) is specific to this mock API.
 - Answers from a 3B model are terse ("Paris; the river Seine.").
 - The judge suite hasn't produced scores for these results, because no hosted key was used.

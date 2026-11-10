@@ -195,6 +195,26 @@ def test_groundedness_guard_rejects_invented_name_without_llm_call(tool_specs):
     assert llm.prompts["VerifierOutput"] == []  # the LLM verifier was never asked
 
 
+def test_partial_answer_with_invented_email_falls_back(tool_specs):
+    """golden none-06: the city is in the record, the email isn't. A draft that
+    answers both parts by inventing an email must never reach the user."""
+    question = "Which city does user 3 live in, and what is their email address?"
+    record = {"id": 3, "name": "Riley Demo", "city": "Ottawa", "member_since": 2020}
+    llm = ScriptedLLM(
+        [api_step("/users/3")],
+        [draft("User 3 lives in Ottawa."), draft("Their email address is riley.demo@example.com.")],
+    )
+    tools = FakeTools(
+        tool_specs, lambda name, *_: api_result("/users/3", record) if name == "mock_api_get" else rag_result("capital-canada")
+    )
+    state = run(question, llm, tools)
+
+    assert state["final"]["status"] == "fallback"
+    assert verdict_checks(state) == ["lexical_guard"] * (1 + MAX_RETRIES)
+    assert "riley.demo@example.com" in state["verification_feedback"]
+    assert llm.prompts["VerifierOutput"] == []  # caught before the LLM verifier
+
+
 def test_self_contradicting_verifier_pass_is_treated_as_fail(tool_specs):
     question = "What is the email address of user 2?"
     record = {"id": 2, "name": "Sam Demo", "city": "Tokyo", "member_since": 2021}

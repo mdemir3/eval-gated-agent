@@ -48,6 +48,30 @@ def test_terms_from_the_question_are_allowed():
     assert unsupported_terms("Kilimanjaro is not mentioned.", EVIDENCE, "Is Kilimanjaro taller?") == []
 
 
+USER_RECORD = '{"id": 3, "name": "Riley Demo", "city": "Ottawa", "member_since": 2020}'
+USER_QUESTION = "Which city does user 3 live in, and what is their email address?"
+
+
+@pytest.mark.parametrize(
+    ("answer", "invented"),
+    [
+        # lowercase, and every word of it ("riley", "demo") is in the record: only a
+        # whole-string check catches it
+        ("Ottawa; riley.demo@example.com.", ["riley.demo@example.com"]),
+        ("User 3 lives in Ottawa; their email address is Riley.Demo@Example.com", ["riley.demo@example.com"]),
+        ("Ottawa; see https://example.com/users/3.", ["https://example.com/users/3"]),
+    ],
+)
+def test_invented_emails_and_urls_are_caught(answer, invented):
+    assert unsupported_terms(answer, USER_RECORD, USER_QUESTION) == invented
+
+
+def test_emails_and_urls_present_in_the_evidence_pass():
+    evidence = '{"id": 7, "email": "help@demo.example", "site": "https://demo.example/help"}'
+    answer = "You can write to help@demo.example or visit https://demo.example/help."
+    assert unsupported_terms(answer, evidence) == []
+
+
 def test_accents_are_folded():
     assert unsupported_terms("Brasília.", "Brasilia became the capital in 1960.") == []
 

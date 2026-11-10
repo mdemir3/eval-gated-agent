@@ -31,7 +31,7 @@ API_TEXT = json.dumps([mock_data.USERS, mock_data.ORDERS, mock_data.WEATHER, moc
 
 def test_golden_set_shape():
     ids = [c.id for c in GOLDEN]
-    assert len(GOLDEN) == 20 and len(set(ids)) == 20
+    assert len(GOLDEN) >= 20 and len(set(ids)) == len(ids)
     assert sum(not c.answerable for c in GOLDEN) >= 5
     assert sum(c.category == "multi_tool" for c in GOLDEN) >= 5
     for case in GOLDEN:
