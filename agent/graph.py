@@ -57,6 +57,28 @@ DEFAULT_TOP_K = 3
 RETRY_TOP_K = 5
 MAX_EVIDENCE_IN_PROMPT = 8
 
+# Hard bounds on one run. The graph stays within them by construction; run_agent
+# enforces the step bound, and the eval report checks every case against all of them.
+# Node runs: the planner, a researcher + verifier pair per pass (1 + MAX_RETRIES passes),
+# then the fallback.
+MAX_GRAPH_STEPS = 1 + 2 * (1 + MAX_RETRIES) + 1
+# Tool calls: each plan step gets 2 attempts, plus 2 for the rag_search fallback when an
+# API call fails twice; each retry pass runs one search with 2 attempts.
+MAX_TOOL_CALLS = MAX_PLAN_STEPS * 4 + MAX_RETRIES * 2
+# Each node logs exactly one of these events per run, so they count node runs.
+_NODE_EVENTS = frozenset({"plan", "draft", "verdict", "refused"})
+
+
+def max_llm_calls(question: str) -> int:
+    """The planner once, then per pass one draft per question part plus one verifier call."""
+    return 1 + (len(question_parts(question)) + 1) * (1 + MAX_RETRIES)
+
+
+def graph_steps(trace: list[TraceEvent]) -> int:
+    """Node runs recorded in a run's trace."""
+    return sum(1 for event in trace if event["event"] in _NODE_EVENTS)
+
+
 # {{N.field}} = a field of step N's API record; {{N.*}} = all its text fields.
 _PLACEHOLDER = re.compile(r"\{\{?\s*(\d+)\s*\.\s*(\*|[A-Za-z_]\w*)\s*\}?\}")
 # A bare slot the planner sometimes writes instead of {{N.field}}: "{}", "{city}", "{{city}}".
@@ -541,6 +563,10 @@ def build_graph(llm: StructuredLLM, tools: ToolClient):
 
 
 async def run_agent(question: str, llm: StructuredLLM, tools: ToolClient) -> AgentState:
-    """Run one question through the graph and return the final state (incl. `final`)."""
+    """Run one question through the graph and return the final state (incl. `final`).
+
+    recursion_limit=MAX_GRAPH_STEPS is the tightest LangGraph setting that lets the
+    longest legal path finish; a routing bug that loops is stopped one node later with
+    GraphRecursionError."""
     graph = build_graph(llm, tools)
-    return await graph.ainvoke({"question": question, "trace": []})
+    return await graph.ainvoke({"question": question, "trace": []}, config={"recursion_limit": MAX_GRAPH_STEPS})

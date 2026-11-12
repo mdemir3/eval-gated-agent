@@ -9,6 +9,7 @@ Checks per golden case (N/A where a check doesn't apply):
                        retrieved evidence item (answerable cases). Lexical, NOT semantic.
 * retrieval            every relevant_doc_id was among the retrieved corpus chunks
 * refusal              unanswerable -> Fallback response; answerable -> not a Fallback
+* limits               node runs, tool calls, LLM calls and retries within the agent's bounds
 
 Normalisation is implemented here rather than imported from the agent's lexical
 guard, so a bug in the agent can't silently make its own eval pass.
@@ -25,7 +26,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from agent.state import FALLBACK_MESSAGE, AgentAnswer
+from agent.graph import MAX_GRAPH_STEPS, MAX_TOOL_CALLS, graph_steps, max_llm_calls
+from agent.state import FALLBACK_MESSAGE, MAX_RETRIES, AgentAnswer
 from tools.mcp_server.mock_data import MockAPIError, resolve_path, route_of
 
 GOLDEN_PATH = Path(__file__).with_name("golden.jsonl")
@@ -37,6 +39,7 @@ CHECKS: dict[str, str] = {
     "lexical_groundedness": "Lexical groundedness of key facts",
     "retrieval": "Relevant docs retrieved",
     "refusal": "Refusal behaviour (fallback iff unanswerable)",
+    "limits": "Within step / call limits",
 }
 
 _STOPWORDS = frozenset("a an and at by for from in into is of on or the to was with".split())
@@ -193,7 +196,22 @@ def check_refusal(case: GoldenCase, final: dict[str, Any]) -> CheckResult:
     return CheckResult("refusal", ok, "" if ok else f"answered an unanswerable question: {final.get('answer')!r}")
 
 
-def evaluate_case(case: GoldenCase, state: dict[str, Any]) -> CaseResult:
+def check_limits(case: GoldenCase, state: dict[str, Any], llm_calls: int | None) -> CheckResult:
+    if not state.get("final"):
+        return CheckResult("limits", False, "the run did not finish")
+    measured = [
+        ("node runs", graph_steps(state.get("trace", [])), MAX_GRAPH_STEPS),
+        ("tool calls", len(state.get("tool_calls", [])), MAX_TOOL_CALLS),
+        ("retries", state.get("retries", 0), MAX_RETRIES),
+    ]
+    if llm_calls is not None:
+        measured.append(("LLM calls", llm_calls, max_llm_calls(case.question)))
+    over = [f"{name} {value} > {bound}" for name, value, bound in measured if value > bound]
+    return CheckResult("limits", not over, "; ".join(over))
+
+
+def evaluate_case(case: GoldenCase, state: dict[str, Any], llm_calls: int | None = None) -> CaseResult:
+    """`llm_calls` is measured by the runner; without it the LLM-call bound isn't checked."""
     final = state.get("final") or {}
     return CaseResult(
         case,
@@ -204,6 +222,7 @@ def evaluate_case(case: GoldenCase, state: dict[str, Any]) -> CaseResult:
             check_lexical_groundedness(case, state),
             check_retrieval(case, state),
             check_refusal(case, final),
+            check_limits(case, state, llm_calls),
         ],
     )
 

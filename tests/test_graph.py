@@ -12,11 +12,17 @@ from collections import defaultdict
 from typing import Any, Callable
 
 import pytest
+from langgraph.errors import GraphRecursionError
 
+import agent.graph as graph_module
 from agent.graph import (
+    MAX_GRAPH_STEPS,
     MAX_PLAN_STEPS,
+    MAX_TOOL_CALLS,
     RETRY_TOP_K,
     api_resources,
+    graph_steps,
+    max_llm_calls,
     resolve_placeholders,
     resolve_sources,
     route_after_verifier,
@@ -358,6 +364,56 @@ def test_real_mcp_tools_flaky_endpoint_end_to_end(tool_specs, index_dir):
     assert state["tool_calls"][2]["args"]["query"] == "Paris river"
     assert state["final"]["status"] == "answered"
     assert state["final"]["sources"] == ["api:/tracking/1001", "capital-france"]
+
+
+# --- limits ----------------------------------------------------------------------------------
+
+
+def test_bounds_follow_from_the_retry_and_plan_limits():
+    assert (MAX_RETRIES, MAX_PLAN_STEPS) == (2, 4)
+    assert MAX_GRAPH_STEPS == 8  # planner + 3 x (researcher, verifier) + fallback
+    assert MAX_TOOL_CALLS == 20  # 4 plan steps x (2 attempts + 2 fallback) + 2 retries x 2 attempts
+    assert max_llm_calls("What is the capital of Canada?") == 7
+    assert max_llm_calls("Which city does user 3 live in, and which river is that city on?") == 10
+
+
+def test_verifier_that_always_fails_stops_at_fallback_within_limits(tool_specs):
+    question = "What is the capital of Canada?"
+    llm = ScriptedLLM([rag_step("capital of Canada")], [draft("Ottawa is the capital of Canada.")], verdicts=[fail()])
+    tools = FakeTools(tool_specs, lambda *_: rag_result("capital-canada"))
+    state = run(question, llm, tools)
+
+    assert state["final"]["status"] == "fallback"
+    assert state["retries"] == MAX_RETRIES == 2
+    assert verdict_checks(state) == ["llm"] * (1 + MAX_RETRIES)  # the LLM verifier said FAIL every time
+    assert graph_steps(state["trace"]) == MAX_GRAPH_STEPS  # the longest legal path, and it finishes
+    # the planned search, then one wider search; the second retry has nothing new to search
+    assert len(state["tool_calls"]) == len(tools.calls) == 2 <= MAX_TOOL_CALLS
+    assert llm.calls == max_llm_calls(question) == 7  # the LLM-call bound is tight
+
+
+def test_tool_calls_stay_bounded_when_every_tool_fails(tool_specs):
+    llm = ScriptedLLM([api_step(f"/users/{i}") for i in range(1, 6)], [INSUFFICIENT])
+    tools = FakeTools(tool_specs, lambda *_: api_error(503))
+    state = run("Where do users 1 to 5 live?", llm, tools)
+
+    assert state["final"]["status"] == "fallback"
+    assert state["retries"] == MAX_RETRIES
+    assert graph_steps(state["trace"]) == MAX_GRAPH_STEPS
+    # 4 plan steps (the 5th is cut) x 2 attempts, one rag_search fallback x 2 (the later
+    # fallbacks would repeat the same search), one retry search x 2
+    assert len(tools.calls) == 12 <= MAX_TOOL_CALLS
+
+
+def test_step_limit_stops_a_routing_bug(tool_specs, monkeypatch):
+    monkeypatch.setattr(graph_module, "route_after_verifier", lambda state: "researcher")  # never ends
+    llm = ScriptedLLM([rag_step("capital of Canada")], [INSUFFICIENT])
+    tools = FakeTools(tool_specs, lambda *_: rag_result("capital-canada"))
+
+    with pytest.raises(GraphRecursionError):
+        run("What is the capital of Canada?", llm, tools)
+    # one draft per researcher run: stopped after 4, not LangGraph's default of 25 steps
+    assert len(llm.prompts["DraftOutput"]) == MAX_GRAPH_STEPS // 2
 
 
 # --- planner validation ------------------------------------------------------------------

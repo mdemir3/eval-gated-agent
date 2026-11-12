@@ -25,9 +25,10 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from agent.graph import run_agent
+from agent.graph import MAX_GRAPH_STEPS, MAX_TOOL_CALLS, graph_steps, max_llm_calls, run_agent
 from agent.llm import LangChainLLM, LLMConfigError
 from agent.mcp_client import MCPToolClient
+from agent.state import MAX_RETRIES
 from evals.deterministic import CHECKS, CaseResult, GoldenCase, evaluate_case, load_golden, summarize
 from evals.llm_judge import DEFAULT_THRESHOLD, JudgeReport, run_judge
 
@@ -44,9 +45,10 @@ async def run_cases(cases: list[GoldenCase], llm: LangChainLLM) -> list[dict[str
         except Exception as exc:  # a crash is a failed case, not a crashed eval run
             error = f"{type(exc).__name__}: {exc}"
         seconds = time.perf_counter() - started
-        result = evaluate_case(case, state)
+        llm_calls = llm.calls - calls_before
+        result = evaluate_case(case, state, llm_calls)
         result.error = error
-        runs.append({"result": result, "state": state, "seconds": seconds, "llm_calls": llm.calls - calls_before})
+        runs.append({"result": result, "state": state, "seconds": seconds, "llm_calls": llm_calls})
         failed = ", ".join(c.name for c in result.failed_checks) or (error or "")
         print(
             f"[{i:>2}/{len(cases)}] {'PASS' if result.passed else 'FAIL'} {case.id:<9} "
@@ -68,6 +70,31 @@ def _git_commit() -> str:
 
 def _pct(passed: int, total: int) -> str:
     return f"{100 * passed / total:.0f}%" if total else "n/a"
+
+
+def render_limits(runs: list[dict[str, Any]]) -> list[str]:
+    """Each per-question bound next to the most any case used."""
+    rows = [
+        ("Graph steps (node runs)", str(MAX_GRAPH_STEPS),
+         lambda r: graph_steps(r["state"].get("trace", [])), lambda r: MAX_GRAPH_STEPS),
+        ("Tool calls", str(MAX_TOOL_CALLS),
+         lambda r: len(r["state"].get("tool_calls", [])), lambda r: MAX_TOOL_CALLS),
+        ("LLM calls", f"1 + {1 + MAX_RETRIES} × (question parts + 1)",
+         lambda r: r["llm_calls"], lambda r: max_llm_calls(r["result"].case.question)),
+        ("Verifier retries", str(MAX_RETRIES),
+         lambda r: r["state"].get("retries", 0), lambda r: MAX_RETRIES),
+    ]
+    lines = [
+        "### Limits per question",
+        "",
+        "| Limit | Bound | Most used (case) | Cases within bound |",
+        "|---|---|---|---|",
+    ]
+    for label, bound_text, measure, bound in rows:
+        most, case_id = max(((measure(r), r["result"].case.id) for r in runs), key=lambda m: m[0])
+        within = sum(measure(r) <= bound(r) for r in runs)
+        lines.append(f"| {label} | {bound_text} | {most} ({case_id}) | {within}/{len(runs)} |")
+    return lines
 
 
 def render_report(runs: list[dict[str, Any]], judge: JudgeReport | None, llm: LangChainLLM, suite: str, wall: float) -> str:
@@ -107,6 +134,8 @@ def render_report(runs: list[dict[str, Any]], judge: JudgeReport | None, llm: La
         f"{flaky_recovered} tool call(s) failed then succeeded on retry; "
         f"{fallback_tool} fallback tool call(s) after a tool failed twice.",
         "",
+        *render_limits(runs),
+        "",
         "## LLM-judge suite",
         "",
     ]
@@ -132,13 +161,20 @@ def render_report(runs: list[dict[str, Any]], judge: JudgeReport | None, llm: La
             mean_a = sum(jr.answer_relevancy for jr in scored) / len(scored)
             lines += ["", f"Mean faithfulness {mean_f:.2f}, mean answer relevancy {mean_a:.2f} over {len(scored)} answered case(s)."]
 
-    lines += ["", "## Cases", "", "| Case | Category | Result | Status | Retries | Tools called | LLM calls | Seconds |", "|---|---|---|---|---|---|---|---|"]
+    lines += [
+        "",
+        "## Cases",
+        "",
+        "| Case | Category | Result | Status | Retries | Steps | Tool calls | Tools used | LLM calls | Seconds |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
     for run in runs:
         r, st = run["result"], run["state"]
         tools = ", ".join(sorted({c["tool"] for c in st.get("tool_calls", [])})) or "-"
         lines.append(
             f"| {r.case.id} | {r.case.category} | {'PASS' if r.passed else '**FAIL**'} | "
-            f"{st.get('final', {}).get('status', 'crash')} | {st.get('retries', '-')} | {tools} | "
+            f"{st.get('final', {}).get('status', 'crash')} | {st.get('retries', '-')} | "
+            f"{graph_steps(st.get('trace', []))} | {len(st.get('tool_calls', []))} | {tools} | "
             f"{run['llm_calls']} | {run['seconds']:.1f} |"
         )
 

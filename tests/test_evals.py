@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from agent.graph import MAX_GRAPH_STEPS, MAX_TOOL_CALLS
 from agent.state import FALLBACK_MESSAGE
 from evals.deterministic import (
     CHECKS,
@@ -164,6 +165,23 @@ def test_malformed_output_fails_format(final):
 def test_crashed_case_fails_every_applicable_check():
     result = evaluate_case(CASE, {})
     assert failed(result) == set(CHECKS)
+
+
+def test_exceeding_a_limit_fails_only_the_limits_check():
+    state = good_state()
+    state["tool_calls"] = state["tool_calls"] * 11  # 22 calls
+    assert len(state["tool_calls"]) > MAX_TOOL_CALLS
+    assert failed(evaluate_case(CASE, state)) == {"limits"}
+
+    state = good_state()
+    state["trace"] = [{"node": "researcher", "event": "draft", "detail": {}}] * (MAX_GRAPH_STEPS + 1)
+    assert failed(evaluate_case(CASE, state)) == {"limits"}
+
+
+def test_llm_call_bound_depends_on_the_number_of_question_parts():
+    # CASE is a two-part question: at most 1 + 3 x (2 + 1) = 10 LLM calls
+    assert evaluate_case(CASE, good_state(), llm_calls=10).passed
+    assert failed(evaluate_case(CASE, good_state(), llm_calls=11)) == {"limits"}
 
 
 @pytest.mark.parametrize(
