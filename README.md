@@ -40,7 +40,7 @@ ollama pull llama3.2:3b                 # if LLM_PROVIDER=ollama
 
 python -m evals.build_index --check     # embed corpus/ into .chroma (downloads the 90 MB embedding model once)
 python -m agent.main "Which city does user 3 live in, and which river is that city on?"
-pytest                                  # 125 unit tests, no LLM needed
+pytest                                  # 131 unit tests, no LLM needed
 python -m evals.run                     # deterministic eval suite; exits 1 on any failure
 python -m evals.run --suite all         # + LLM judge, if a hosted judge key is set
 ```
@@ -124,6 +124,7 @@ data, so the dataset can't demand an answer the sources don't support.
 | Lexical groundedness | every expected key fact is contained, by token overlap, in a single retrieved evidence item |
 | Retrieval | every relevant doc id was among the retrieved chunks |
 | Refusal | Fallback if and only if the case is unanswerable |
+| Limits | the run stays within the agent's bounds: node runs, tool calls, LLM calls (for that question) and verifier retries |
 
 "Lexical groundedness" is named that way on purpose: it's token overlap, not
 semantic faithfulness. Semantic faithfulness is the judge suite's job. The eval
@@ -140,8 +141,9 @@ a 3B model grading itself isn't evidence.
 
 ### Results
 
-Local run on the code in this repo: `ollama:llama3.2:3b`, temperature 0, seed 42,
-Python 3.11 on macOS arm64.
+CI run [43159021392](https://github.com/mdemir3/eval-gated-agent/actions/runs/43159021392)
+on commit `2ff537e`: GitHub Actions, Linux x86_64 (CPU), `ollama:llama3.2:3b`,
+temperature 0, seed 42.
 
 | Check | Result |
 |---|---|
@@ -151,13 +153,25 @@ Python 3.11 on macOS arm64.
 | Lexical groundedness | 15/15 |
 | Retrieval | 13/13 |
 | Refusal | 21/21 |
+| Limits | 21/21 |
 | **Cases passing every check** | **21/21** |
 | LLM-judge | not run (no key) |
 
-About 4 minutes and 82 LLM calls for the 21 cases. Two consecutive runs produced
-identical answers, sources and retry counts. Ollama output can differ across
-hardware (Metal locally vs CPU in CI), so the CI run is the result of record. See
-[Limitations](#limitations) before reading much into the 100%.
+| Limit per question | Bound | Most used (case) |
+|---|---|---|
+| Graph steps (node runs) | 8 | 8 (every unanswerable case) |
+| Tool calls | 20 | 6 (multi-04) |
+| LLM calls | 1 + 3 × (question parts + 1) | 8 (multi-01, bound 10) |
+| Verifier retries | 2 | 2 |
+
+The run took 14.9 minutes and made 86 LLM calls for the 21 cases.
+
+Output isn't fully deterministic on CI, even at temperature 0 with a fixed seed.
+multi-01 passed with 0 retries in the run for `7a22404` and needed 2 here, with no
+change to prompts or agent logic in between. Here its first draft named "Japan"
+before any retrieved evidence did, so the groundedness guard rejected it. A
+half-answer was then rejected by the completeness guard, and the third draft
+passed. See [Limitations](#limitations) before reading much into the 100%.
 
 ### CI: `.github/workflows/evals.yml`
 
@@ -201,6 +215,11 @@ These came out of measuring the agent rather than guessing:
   endpoints become corpus searches. Bare `{}` slots get wired to the previous API
   record. Placeholders are renumbered when a step is dropped. API calls are dropped
   for questions that mention no API record type.
+- **Every run is bounded.** A run is at most 8 node runs (planner, 3 researcher +
+  verifier passes, fallback), 20 tool calls and `1 + 3 × (question parts + 1)` LLM
+  calls. The step bound is enforced through LangGraph's `recursion_limit`, which has
+  to be 9: LangGraph counts its final "nothing left to run" check as a step. CI
+  caught my first version, which used 8 and cut off every retry-then-fallback run.
 - **Every eval case gets a fresh MCP server process**, so the flaky endpoint's state
   can't leak between cases.
 
@@ -213,10 +232,11 @@ These came out of measuring the agent rather than guessing:
   pairing of words that both appear in the evidence. The completeness guard detects
   parts with a regex on ", and which/what/who/in what …".
 - **Most refusals rest on the drafter.** In the reported run, the 6 unanswerable
-  cases went through 18 verifier passes. 14 were rejected because the drafter
-  declared the evidence insufficient, 2 by the groundedness guard, 1 by the LLM
-  verifier and 1 by the consistency check. The whole-string email check did not fire;
-  it is covered by unit tests, including the none-06 scenario.
+  cases went through 18 verifier passes. 15 were rejected because the drafter
+  declared the evidence insufficient, 1 by the groundedness guard (an invented
+  number, none-02), 1 by the LLM verifier and 1 by the consistency check (both
+  none-05). The whole-string email check did not fire; it is covered by unit tests,
+  including the none-06 scenario.
 - `API_HINT_WORDS` (which words justify an API call) is specific to this mock API.
 - Answers from a 3B model are terse ("Paris; the river Seine.").
 - The judge suite hasn't produced scores for these results, because no hosted key was used.
