@@ -565,8 +565,10 @@ def build_graph(llm: StructuredLLM, tools: ToolClient):
 async def run_agent(question: str, llm: StructuredLLM, tools: ToolClient) -> AgentState:
     """Run one question through the graph and return the final state (incl. `final`).
 
-    recursion_limit=MAX_GRAPH_STEPS is the tightest LangGraph setting that lets the
-    longest legal path finish; a routing bug that loops is stopped one node later with
-    GraphRecursionError."""
+    LangGraph counts the final "nothing left to run" check as a step, so the longest
+    legal path (MAX_GRAPH_STEPS node runs) needs recursion_limit = MAX_GRAPH_STEPS + 1.
+    A routing bug that loops is stopped with GraphRecursionError after that many node runs."""
     graph = build_graph(llm, tools)
-    return await graph.ainvoke({"question": question, "trace": []}, config={"recursion_limit": MAX_GRAPH_STEPS})
+    return await graph.ainvoke(
+        {"question": question, "trace": []}, config={"recursion_limit": MAX_GRAPH_STEPS + 1}
+    )

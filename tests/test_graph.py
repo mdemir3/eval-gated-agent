@@ -412,7 +412,8 @@ def test_step_limit_stops_a_routing_bug(tool_specs, monkeypatch):
 
     with pytest.raises(GraphRecursionError):
         run("What is the capital of Canada?", llm, tools)
-    # one draft per researcher run: stopped after 4, not LangGraph's default of 25 steps
+    # one draft per researcher run: stopped after MAX_GRAPH_STEPS + 1 node runs
+    # (planner, then 4 researcher/verifier pairs), not LangGraph's default of 25 steps
     assert len(llm.prompts["DraftOutput"]) == MAX_GRAPH_STEPS // 2
 
 
