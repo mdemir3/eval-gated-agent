@@ -222,6 +222,7 @@ These came out of measuring the agent rather than guessing:
   caught my first version, which used 8 and cut off every retry-then-fallback run.
 - **Every eval case gets a fresh MCP server process**, so the flaky endpoint's state
   can't leak between cases.
+- **Chunks stay at 120 words (one per doc).** Measured locally with 25-word chunks (47 instead of 21): sanity 4/4 and RAG 7/7, unchanged, but the mean top-hit score fell from 0.760 to 0.745 and rag-07 needed a verifier retry, so I kept 120.
 
 ## Limitations
 
